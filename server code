@@ -1,0 +1,920 @@
+
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.Serializable;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Scanner;
+
+class server extends Thread{
+	private ServerSocket sS;
+	private String[] roomnameArray;
+    
+    //roomList의 순서는 절대로 바뀌어선 안된다. findroom, 때문이라도
+    private ArrayList<room> roomList = new ArrayList<room>();
+    private ArrayList<human> humanList = new ArrayList<human>();
+    private ArrayList<serverThread> connectList = new ArrayList<serverThread>();
+    private String ip;
+    private int roomCount=0;
+
+    Socket sockTemp = null;//sendMessage
+    Socket getSockTemp = null;
+    boolean b;
+
+    private int input=0;
+    
+    public server() throws ClassNotFoundException, FileNotFoundException, IOException {
+    	try {
+    		ObjectInputStream ois;
+    		String[] strary;
+			ip = InetAddress.getLocalHost().getHostAddress();
+			File f = new File("./serverHuman");
+			if(f.exists()) {
+				strary = f.list();
+				for(int i=0;i<strary.length;i++) {
+					humanList.add(readHuman(strary[i]));
+				}
+			}
+			
+			f = new File("./serverRoom");
+			if(f.exists()) {
+				strary = f.list();
+				for(int i=0;i<strary.length;i++) {
+					roomList.add(readRoom(strary[i]));
+				}
+			}
+			System.gc();
+			
+		} catch (UnknownHostException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+    	
+    }
+
+    @Override
+    public void run()  {
+        b = true;
+        try {
+			sS = new ServerSocket(8988);
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+        
+		try{			
+			while(b){
+				Socket runSock = sS.accept();
+				serverThread tr = new serverThread(runSock);
+				if(tr != null) {
+					tr.start();
+					connectList.add(tr);
+				}
+				Thread.sleep(100);
+			}
+		}
+		catch(Exception e){
+			
+		}
+    }
+
+    public synchronized room addRoom(String name, int cmd, String passwd) throws FileNotFoundException, IOException{
+        room ar;
+        if(cmd < 1) {
+            ar = new room(name, roomCount);
+        }else{
+            ar = new room(name, roomCount, passwd);
+        }
+        roomList.add(ar);
+        roomCount++;
+        return ar;
+    }
+    
+    public human addHuman(String name, String id, String passwd, String email, boolean[] logic) throws FileNotFoundException, IOException {
+    	human h = null;
+    	synchronized(humanList) {
+			h = new human(name, id, passwd, email, logic);
+			humanList.add(h);
+		}
+		return h;
+    }
+    
+    public void setHuman(int humanlistP, int point, String temp, boolean[] logic) {
+    	synchronized(humanList) {
+    		switch(point) {
+        	case 0:
+        		humanList.get(humanlistP).name = temp;
+        		break;
+        	case 1:
+        		humanList.get(humanlistP).id = temp;
+        		break;
+        	case 2:
+        		humanList.get(humanlistP).passwd = temp;
+        		break;
+        	case 3 :
+        		humanList.get(humanlistP).email = temp;
+        		break;
+        	case 4 :
+        		humanList.get(humanlistP).roomLogic = logic;
+        		break;
+        	}
+    	}
+    }
+    
+	//이름, 아이디, 패스워드, 이메일, 현재 접속ip
+    public void deleteHuman(int option, String temp) {
+    	synchronized(humanList) {
+    		switch(option) {
+    		case 0 :
+        		for(int i=0;i<humanList.size();i++) {
+        			if(humanList.get(i).name.equals(temp)) {
+        				humanList.remove(i);
+        				break;
+        			}
+        		}
+    			break;
+    		case 1 :
+    			for(int i=0;i<humanList.size();i++) {
+        			if(humanList.get(i).id.equals(temp)) {
+        				humanList.remove(i);
+        				break;
+        			}
+        		}
+    			break;
+    		case 2 :
+    			for(int i=0;i<humanList.size();i++) {
+        			if(humanList.get(i).passwd.equals(temp)) {
+        				humanList.remove(i);
+        				break;
+        			}
+        		}
+    			break;
+    		case 3 :
+    			for(int i=0;i<humanList.size();i++) {
+        			if(humanList.get(i).email.equals(temp)) {
+        				humanList.remove(i);
+        				break;
+        			}
+        		}
+    			break;
+    		case 4 :
+    			for(int i=0;i<humanList.size();i++) {
+        			if(humanList.get(i).ip.equals(temp)) {
+        				humanList.remove(i);
+        				break;
+        			}
+        		}
+    			break;
+    		}
+    	}
+    }
+    /*
+    public void deleteRoom(String name1) {
+    	synchronized(roomList) {
+    		for(int i=0;i<roomList.size();i++) {
+    			if(roomList.get(i).equals(name1)) {
+    				roomList.remove(i);
+    				break;
+    			}
+    		}
+    	}
+    }
+    
+    public void deleteRoom(int p) {
+    	synchronized(roomList) {
+    		roomList.remove(p);
+    	}
+    }*/
+
+	public void serverMenu(int p, int[] cmd, String[] args, boolean[] logic) throws FileNotFoundException, IOException{
+		human h;
+		room r;
+		ObjectOutputStream oos;
+		File fpo;
+		switch(p){
+			case 1 : 
+				//0,4,n == roomCount
+				h = addHuman(args[0], args[1], args[2], args[3], logic);
+				fpo = new File("./serverRoom/");
+	            if(!fpo.exists()) {
+	            	fpo.mkdir();
+	            }else if(!fpo.isDirectory()) {
+	            	fpo.delete();
+	            	fpo.mkdir();
+	            }
+	            writeHuman(h);
+				break;
+			case 2 : 
+				//0,2,1
+				r = addRoom(args[0], cmd[0], args[1]);
+				fpo = new File("./serverRoom/");
+	            if(!fpo.exists()) {
+	            	fpo.mkdir();
+	            }else if(!fpo.isDirectory()) {
+	            	fpo.delete();
+	            	fpo.mkdir();
+	            }
+	            writeRoom(r);
+				break;
+			case 3 :
+				// 2,1,n == roomCount
+				//사람 번호, 수정할 정보 번호, 수정할 글자
+				setHuman(cmd[0], cmd[1], args[0], logic);
+				break;
+			case 4 :
+				//1,1,0
+				deleteHuman(cmd[0], args[0]);
+				break;
+			case 5 :
+				//0,1,0
+				for(int i=0;i<connectList.size();i++) {
+					System.out.println(connectList.get(i).h.name);
+				}
+				break;
+		}
+	}
+	
+	private room readRoom(String name) throws NumberFormatException, IOException {
+		room p;
+		BufferedReader br = new BufferedReader(new FileReader(new File("./serverRoom/"+name)));
+		p = new room(br.readLine(),Integer.parseInt(br.readLine()),br.readLine(),Integer.parseInt(br.readLine()));
+		br.close();
+		return p; 
+	}
+	
+	private void writeRoom(room r) throws IOException {
+		BufferedWriter bw = new BufferedWriter(new FileWriter(new File("./serverRoom/"+r.name)));
+		bw.write(r.name+"\n");
+		bw.write(r.roomNum+"\n");
+		bw.write(r.roomPasswd+"\n");
+		bw.write(r.roomPasswdLogic+"\n");
+		bw.close();
+	}
+	
+	//20180604 read write human
+	private human readHuman(String name) throws IOException {
+		human h;
+		BufferedReader br = new BufferedReader(new FileReader(new File("./serverHuman/"+name)));
+		String id, passwd, email;
+		int bolnum;
+		
+		id = br.readLine();
+		passwd = br.readLine();
+		email = br.readLine();
+		bolnum = Integer.parseInt(br.readLine());
+		System.out.println("방 논리 길이 : "+bolnum);
+		boolean b[] = new boolean[bolnum];
+		
+		for(int i=0;i<b.length;i++) {
+			b[i] = inttobool(Integer.parseInt(br.readLine()));
+			System.out.println(""+b[i]);
+		}
+		br.close();
+		
+		return new human(name,id,passwd,email,b);
+	}
+	
+	private void writeHuman(human h) throws IOException {
+		File f;
+		if(!(f = new File("./serverHuman")).exists()) {
+			f.mkdir();
+		}else if(!f.isDirectory()) {
+			f.delete();
+			f.mkdir();
+		}
+		BufferedWriter bw = new BufferedWriter(new FileWriter(new File("./serverHuman/"+h.name)));
+		bw.write(h.id+"\n");
+		bw.write(h.passwd+"\n");
+		bw.write(h.email+"\n");
+		bw.write(h.roomLogic.length+"\n");
+		for(int i=0;i<h.roomLogic.length;i++) {
+			bw.write(booltoint(h.roomLogic[i])+"\n");
+		}
+		bw.close();
+	}
+	
+	private int booltoint(boolean b) {
+		if(b) {return 1;}
+		else{return 0;}
+	}
+	
+	private boolean inttobool(int i) {
+		if(i > 0) {return true;}
+		else{return false;}
+	}
+	
+	
+	private String[] returnRoomList() {
+		String[] ary = new String[roomList.size()];
+		for(int i=0;i<roomList.size();i++) {
+			ary[i] = roomList.get(i).name;
+		}
+		return ary;
+	}
+	
+    public void inputCmd() throws FileNotFoundException, IOException  {
+    	Scanner sc = new Scanner(System.in);
+    	int p;
+    	while(true) {
+			System.out.println("0. exit\n1. 계정 추가\n2. 방 추가\n3.계정 설정\n4.계정 삭제\n5. 방 삭제\n6. 현재 방 출력\n7. 계정 출력\n8. 현재 접속중인 아이디\n");
+    		p = sc.nextInt();
+        	switch(p) {
+        	case 1:
+				System.out.println("\n0.이름 1.아이디 2.패스워드 3.이메일 4~ 방 권한 설정(0,1)");
+        		serverMenu(p,null, inputString(4), inputIntToBoolean(roomList.size()));
+        		break;
+        	case 2:
+				System.out.println("\n 0.패스워드 사용(0,1) 1.방이름 2.패스워드");
+        		serverMenu(p,inputInt(1), inputString(2), null);
+        		break;
+        	case 3: 
+				System.out.println("\n0.사람 번호, 1.수정할 정보 번호, 2.수정할 글자");
+        		serverMenu(p,inputInt(2), inputString(1), inputIntToBoolean(roomList.size()));
+        		break;
+        	case 4 :
+				System.out.println("0.선택 : 0.이름, 1.아이디, 2.패스워드, 3.이메일, 4.현재 접속ip\n1.글자 입력 ");
+        		serverMenu(p,inputInt(1), inputString(1), null);
+        		break;
+        	case 5 :
+				System.out.println("방이름 입력");
+        		serverMenu(p,null, inputString(1), null);
+        		break;
+        	case 6 :
+        		for(int i=0;i<roomList.size();i++) {
+        			System.out.println(roomList.get(i).name);
+        		}
+        		break;
+        	case 7 :
+        		for(int i=0;i<humanList.size();i++) {
+        			System.out.println(humanList.get(i).name);
+        		}
+        		break;
+        	case 8 :
+        		serverMenu(5,null,null,null);
+        		break;
+        	case 0:
+        		b=false;
+        		this.interrupt();
+        		try {
+					this.join();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+        		return;
+        	default :
+        		break;
+        	}
+			sc.nextLine();
+    	}
+    }
+	
+	private String[] inputString(int p) {
+		String[] ar = new String[p];
+		Scanner sc = new Scanner(System.in);
+		for(int i=0;i<p;i++) {
+			System.out.println(i+"번째 글자 입력 = ");
+			ar[i] = sc.next();
+			sc.nextLine();
+		}
+		return ar;
+	}
+	
+	private boolean[] inputBoolean(int p) {
+		boolean[] ar = new boolean[p];
+		Scanner sc = new Scanner(System.in);
+		for(int i=0;i<p;i++) {
+			 System.out.print("\n"+i+" bool : ");
+			 ar[i] = sc.nextBoolean();
+			 sc.nextLine();
+		}
+		return ar;
+	}
+	
+	private int[] inputInt(int p) {
+		int[] a = new int[p];
+		Scanner sc = new Scanner(System.in);
+		for(int i=0;i<p;i++) {
+			 System.out.print("\n"+i+" bool : ");
+			 a[i] = sc.nextInt();
+			 sc.nextLine();
+		}
+		
+		return a;
+	}
+	
+	private boolean[] inputIntToBoolean(int p) {
+		int a;
+		boolean b[] = new boolean[p];
+		Scanner sc = new Scanner(System.in);
+		for(int i=0;i<p;i++) {
+			 System.out.print("\n"+i+" bool(0 or 1) : ");
+			 a = sc.nextInt();
+			 sc.nextLine();
+			 if(a > 0) {
+				 b[i] = true;
+			 }
+		}
+		
+		return b;
+	}
+    
+	class human implements Serializable{
+        private String name, id, passwd;
+        private String ip;
+        private String email;
+        private boolean[] roomLogic;
+
+        private human(String name, String id, String passwd, String email, boolean[] logic) throws FileNotFoundException, IOException{
+            if(logic.length < roomList.size()){
+                new Exception("logic array error");
+                return;
+            }
+            this.id = id;
+            this.name = name;
+            this.passwd = passwd;
+            this.email = email;
+            this.roomLogic = new boolean[logic.length];
+            for(int i=0;i<logic.length;i++){
+                roomLogic[i] = logic[i];
+            }
+            
+        }
+
+        public String getName() {
+            return name.toString();
+        }
+        
+        public void setIP(String ip) {
+        	this.ip = ip;
+        }
+        
+        public String getID() {
+        	return id.toString();
+        }
+        
+        public String getPasswd() {
+        	return passwd.toString();
+        }
+
+		public boolean[] getRoomArray() {
+			boolean[] a = new boolean[roomLogic.length];
+			for(int i=0;i<roomLogic.length;i++) {
+				a[i] = roomLogic[i];
+			}
+			return a;
+		}
+		
+		public int setRoomArray(boolean[] ary) {
+			boolean[] a = new boolean[ary.length];
+			for(int i=0;i<roomLogic.length;i++) {
+				a[i] = ary[i];
+			}
+			
+			roomLogic = a;
+			return 0;
+		}
+		
+		public boolean getRoomLogic(int i) {
+			return roomLogic[i];
+		}
+		
+		public int getroomLogicLength() {
+			return roomLogic.length;
+		}
+    }
+    
+    class serverThread extends Thread{
+        Socket s;
+        human h = null;
+
+        String temp;
+        InputStreamReader isr = null;
+        BufferedReader br = null;
+        OutputStreamWriter osw = null;;
+        BufferedWriter bw = null;
+        int lifeTime = 300;
+        
+        public serverThread(Socket s){
+        	int slength;
+        	char temp[];
+        	this.s = s;
+        	boolean b = true;
+            try {
+            	osw = new OutputStreamWriter(s.getOutputStream());
+            	bw = new BufferedWriter(osw);
+				isr = new InputStreamReader(s.getInputStream());
+				br = new BufferedReader(isr);
+				
+				//아이디 길이 받음
+				slength = isr.read();
+				if(slength > 12) {
+					osw.write(1);
+					osw.flush();
+					return;
+				}
+				osw.write(0);
+				osw.flush();
+				
+				temp = new char[slength];
+				//아이디 입력
+				isr.read(temp, 0, slength);
+				this.temp = new String(temp);
+				
+				//아이디 길이 비교
+	            for(int i=0;i<humanList.size();i++) {
+	            	if((h = humanList.get(i)).id.equals(this.temp)) {
+	            		System.out.println("아이디 확인 = "+this.temp);
+	            		b = false;
+	            		break;
+	            	}
+	            }
+
+				//아이디 확인완료
+	            if(b) {
+	            	osw.write(1);
+	            	osw.flush();
+	            	System.out.println("아이디 확인 에러"+this.temp+"!");
+	            	return;
+	            }
+	            osw.write(0);
+	            osw.flush();
+	            System.out.println("아이디 확인 완료");
+	            
+	            //패스워드 길이 받기
+	            slength = isr.read();
+				if(slength > 12) {
+					osw.write(1);
+					osw.flush();
+					return;
+				}
+				osw.write(0);
+				osw.flush();
+	            temp = new char[slength];
+	            
+				//패스워드 읽기
+	            isr.read(temp);
+				
+				//패스워드 확인 전송
+	            this.temp = new String(temp);
+	            if(!h.getPasswd().equals(this.temp)) {
+	            	osw.write(1);
+	            	osw.flush();
+	            	System.out.println("패스워드 확인 에러"+this.temp+"!");
+	            	return;
+	            }
+	            System.out.println("3");
+            	//서버 확인 보냄
+	            osw.write(0);
+	            osw.flush();
+	            
+	            //방목록 요청 받음
+	            if(isr.read() != 0) {
+	            	return;
+	            }
+	            
+	            
+	            //방목록 보냄
+	            for(int i=0;i<roomList.size();i++) {
+					osw.write(1);
+					osw.flush();
+					System.out.println("1보냄");
+					isr.read();//2
+					System.out.println("2읽음");
+					bw.write(roomList.get(i).name+"\n");
+					bw.flush();
+					System.out.println("방이름 보냄");
+					isr.read();//3
+					System.out.println("3읽음");
+	            }
+	            osw.write(0);
+	            osw.flush();
+	            
+				h.ip = new String(s.getInetAddress().getAddress());
+				System.out.println("4연결완료");
+			} catch (IOException e) {
+				e.printStackTrace();
+			}     
+        }
+        
+        public void exitConnet() throws IOException, InterruptedException {
+        	synchronized(connectList) {
+            	s.close();
+            	connectList.remove(this);
+            	interrupt();
+        	}
+        }
+
+        public void run(){
+            boolean myb = true;
+            new Thread() {
+            	@Override
+            	public void run() {
+            		while(lifeTime > 0) {
+            			lifeTime--;
+            			try {
+							Thread.sleep(1000);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
+            		}
+
+            		try {
+						exitConnet();
+					} catch (Exception e) {
+						e.printStackTrace();
+					} 
+            	}
+            }.start();
+            
+            try{
+                while(myb){
+                    switch(isr.read()){
+                        case 0 :
+							myb=false;
+							exitConnet();
+                            break;
+                        case 1 :
+                            //마지막날짜부터 현재까지의 모든 메세지 보내기
+                        	sendMessage();
+                            break;
+                        case 2 :
+                        	//방이름을 받은 뒤,
+                            getMessage();
+							break;
+                    }
+                    lifeTime = 60;
+                    Thread.sleep(100);
+                }
+            }catch(Exception e){
+
+            }
+        }
+        
+        
+        public int sendMessage() throws IOException, InterruptedException {
+        	//서버가 사람에대한 저장된 정보에서 방에대한 권한을 확인한뒤,
+            //해당하는 방의 모든 메세지를 전송(방에대한 데이터 저장순서는 바뀌어선 안된다)
+			//자체 통신 보완 기능이 없다보니 아직 완벽한 tcp는 절대로 아니다.
+			InputStreamReader isr = new InputStreamReader(s.getInputStream());
+    		OutputStreamWriter osw = new OutputStreamWriter(s.getOutputStream());
+            BufferedWriter bw = new BufferedWriter(osw);
+            
+            room r;
+        	boolean[] a = h.roomLogic;
+        	//메뉴 접속 완료
+        	osw.write(7);
+        	osw.flush();
+
+    		//System.out.println("현재 방의 로직 길이 = "+a.length);
+        	for(int j=0;j<a.length;j++){
+        		//System.out.println("현재 방의 로직"+a[j]);
+                if(a[j]){
+                	//나중에 시간부분 예외처리 조작해주어야함.
+					r = roomList.get(j);
+                	synchronized(r) {
+                		File f = new File(r.getName());
+                        if(!f.exists()){
+                            f.mkdir();
+                        }else if(!f.isDirectory()){
+                            f.delete();
+                            f.mkdir();
+                        }
+                        
+                        File f1 = new File(f.getAbsolutePath()+"/message/");
+                        if(!f1.exists()){
+                            f1.mkdir();
+                        }else if(!f1.isDirectory()){
+                            f1.delete();
+                            f1.mkdir();
+                        }
+						
+                	
+                        //보내줘 요청 받음
+                        isr.read();
+                        
+                        
+                        //방이름 전송
+                        bw.write(r.getName()+"\n");
+                        bw.flush();
+
+                        //System.out.println("방이름 전송");
+            			//방이름받음 확인받음
+                        if(isr.read()!=0) {
+                            System.out.println("0이 아님!");
+                        	return 1;
+                        }
+                        //System.out.println("방이름 수신 확인");
+                        
+                        int lastnum = f1.listFiles().length;
+                        //현재까지 해당 방이 가지고있는 파일 리스트 개수
+                        //System.out.println("서버가 가지고 있는 파일리스트 개수 = "+lastnum);
+                        osw.write(lastnum);
+						osw.flush();
+                        
+						//클라이언트가 해당 방에 가지고있는 파일의 개수
+                        lastnum = isr.read();
+                        //System.out.println("클라가 가지고 있는 파일리스트 개수 = "+lastnum);
+                        if(lastnum >= f1.list().length) {
+                        	osw.write(1);//종료명령보냄
+                        	osw.flush();
+                        	return 1;
+                        }
+                        
+                        File fary[] = f1.listFiles();
+                        String stemp;
+                        for(int i=lastnum;i<fary.length;i++){
+                        	osw.write(2);osw.flush();
+                        	if(isr.read()!=2) {
+                            	return 2;
+                            }
+                        	
+                                //파일 읽는 버퍼리더
+                            BufferedReader br = new BufferedReader(new FileReader(fary[i]));
+                                //파일 이름 전송
+                            bw.write(fary[i].getName()+"\n");
+                            bw.flush();
+                                //파일 이름 수신 완료
+                            if(isr.read()!=3) {
+                              	return 3;
+                            }//파일이름 받음 확인
+                            while((stemp = br.readLine()) != null){
+                                    //파일내용 전송
+                            System.out.println("stemp " + lastnum);
+                            osw.write(4);osw.flush();
+                            if(isr.read() != 4) {
+                            	return 4;
+                            }
+                            bw.write(stemp+"\n");
+                            bw.flush();
+                            if(isr.read()!=5) {
+                               	return 5;
+                                }
+                            }
+                            osw.write(1);osw.flush();//4
+                            bw.close();
+                                //보내는 순서
+                                //1.파일 이름
+                                //2.파일 내용
+                        }
+                	}
+                }
+            }
+            return 0;
+        }
+        
+        private room findRoom(String roomName) {
+        	room a = null;
+        	for(int i=0;i<h.getroomLogicLength();i++) {
+        		a = roomList.get(i);
+            	if(a.getName().equals(roomName)) {
+            		if(!h.getRoomLogic(i)) {
+                		return null;
+                	}
+            		break;
+            	}
+        	}
+        	return a;
+        }
+        
+        
+        public int getMessage() throws IOException {
+
+        	osw.write(2);
+        	osw.flush();
+        	//방이름 받음
+			String roomName = br.readLine();
+			
+        	//메세지 읽을 리더
+        	BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
+        	//방의 권한 확인
+        	OutputStreamWriter oswConn = new OutputStreamWriter(s.getOutputStream());
+        	room r = findRoom(roomName);
+            System.out.println("fileroom clear");
+        	synchronized(r) {
+	        	int timetemp;
+	            	
+	            //권한 결과 보내줌
+	        	if(r == null) {
+	        		//해당 방의 권한 없음
+	        		oswConn.write(1);
+	        		return 1;
+	        	}
+	    		oswConn.write(0);
+	            System.out.println("권한 결과 보냄");
+	        	
+	        	
+	            //파일 번호단위로 읽을 것
+	    		File f1 = new File(r.name);
+	            //폴더 준비부분
+	        	if(!f1.exists()){
+	                f1.mkdir();
+	            }else if(!f1.isDirectory()){
+	            	f1.delete();
+	                f1.mkdir();
+	            }
+	            f1 = new File(f1.getAbsolutePath()+"/message");
+	            if(!f1.exists()){
+	                f1.mkdir();
+	            }else if(!f1.isDirectory()){
+	            	f1.delete();
+	                f1.mkdir();
+	            }
+	
+	            timetemp = f1.list().length+1;
+	            
+	            String temp;
+	                
+		      //파일 준비부분
+	            PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(f1.getAbsolutePath()+"/"+timetemp, true)));
+		      //메세지 구분자와 이름
+	            pw.println("$※"+h.getName()+"&$\n");
+		      //메세지 받기 부분
+	            while((temp = br.readLine()) != null){
+		          pw.println(temp);
+	            }
+	            pw.println("&4789※\n");
+	            pw.flush();
+	            pw.close();
+	            oswConn.write(0);
+            }
+            return 0;
+        }
+    }
+
+
+    private class room implements Serializable{
+        String name = null;//방이름 유일한 것
+        int roomNum;//유일한 번호
+        int roomPasswdLogic;
+        String roomPasswd=null;
+        
+        
+        public String getName(){
+            return name;
+        }
+        
+        public room(String name, int roomNum) {
+            this.roomNum = roomNum;
+            this.name = name;
+            this.roomPasswd = null;
+            roomPasswdLogic = 0;
+			
+        }
+        
+        public room(String name, int roomNum, String passwd) {
+            this.roomNum = roomNum;
+            this.name = name;
+            this.roomPasswd = passwd;
+            roomPasswdLogic = 1;
+            
+        }
+        
+        public room(String name, int roomNum, String passwd, int passwdLogic) {
+            this.roomNum = roomNum;
+            this.name = name;
+            this.roomPasswd = passwd;
+            roomPasswdLogic = passwdLogic;
+            
+        }
+    }
+    
+}
+	
+public class a10{
+	public static void main(String[] args){
+		server s = null;
+		try {
+			s = new server();
+			s.start();//port 8988
+			
+			s.inputCmd();
+		} catch (ClassNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+	}
+}
